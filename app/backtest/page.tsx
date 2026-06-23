@@ -8,7 +8,6 @@ import {
 } from "recharts";
 import type { BacktestParams, BtTrade, PairResult, PortfolioSummary } from "@/app/api/backtest/route";
 
-// ─── constants ───────────────────────────────────────────────────────────────
 const ALL_PAIRS = ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCHF", "USDJPY", "USDCAD"];
 
 const PAIR_COLORS: Record<string, string> = {
@@ -16,7 +15,6 @@ const PAIR_COLORS: Record<string, string> = {
   NZDUSD: "#a78bfa", USDCHF: "#fb923c", USDJPY: "#f472b6", USDCAD: "#34d399",
 };
 
-// Default date range: last 60 days
 function defaultDates() {
   const to   = new Date();
   const from = new Date(Date.now() - 60 * 86400_000);
@@ -31,15 +29,11 @@ const DEFAULTS: BacktestParams = {
   dateFrom:           dates.from,
   dateTo:             dates.to,
   startingBalanceAED: Math.round(10000 * AED_RATE),
-  asianStart:         2,  asianEnd:      7,
-  breakoutStart:      8,  breakoutEnd:   10,
-  cutoffHour:         12,
-  bufferPips:         2,  tpMultiplier:  1.5,
-  minRangePips:       15, maxRangePips:  50,
-  riskPct:            1,  breakevenR:    1,
+  asianStart: 2, asianEnd: 7, breakoutStart: 8, breakoutEnd: 10, cutoffHour: 12,
+  bufferPips: 2, tpMultiplier: 1.5, minRangePips: 15, maxRangePips: 50,
+  riskPct: 1, breakevenR: 1,
 };
 
-// Setting keys mapped from param keys
 const ENGINE_KEYS: Record<string, string> = {
   bufferPips:    "strategy_entry_buffer_pips",
   tpMultiplier:  "strategy_tp_multiplier",
@@ -55,21 +49,20 @@ const ENGINE_KEYS: Record<string, string> = {
 };
 
 type ResultData = {
-  byPair:           PairResult[];
-  portfolio:        { summary: PortfolioSummary; equityCurve: { date: string; balance: number }[]; allTrades: BtTrade[] };
-  intervalUsed:     string;
+  byPair:             PairResult[];
+  portfolio:          { summary: PortfolioSummary; equityCurve: { date: string; balance: number }[]; allTrades: BtTrade[] };
+  intervalUsed:       string;
   startingBalanceUsd: number;
 };
 
-// ─── main page ───────────────────────────────────────────────────────────────
 export default function BacktestPage() {
-  const [params, setParams]       = useState<BacktestParams>(DEFAULTS);
-  const [running, setRunning]     = useState(false);
-  const [result, setResult]       = useState<ResultData | null>(null);
-  const [error, setError]         = useState<string | null>(null);
-  const [applying, setApplying]   = useState(false);
-  const [applied, setApplied]     = useState(false);
-  const [logOpen, setLogOpen]     = useState(false);
+  const [params, setParams]         = useState<BacktestParams>(DEFAULTS);
+  const [running, setRunning]       = useState(false);
+  const [result, setResult]         = useState<ResultData | null>(null);
+  const [error, setError]           = useState<string | null>(null);
+  const [applying, setApplying]     = useState(false);
+  const [applied, setApplied]       = useState(false);
+  const [logOpen, setLogOpen]       = useState(false);
   const [activePair, setActivePair] = useState<string | null>(null);
 
   function setNum(key: keyof BacktestParams) {
@@ -116,26 +109,22 @@ export default function BacktestPage() {
     }
   }
 
-  const s    = result?.portfolio.summary;
-  const pf   = s?.profitFactor ?? 0;
+  const s         = result?.portfolio.summary;
+  const pf        = s?.profitFactor ?? 0;
   const showChart = activePair
     ? result?.byPair.find((r) => r.pair === activePair)?.equityCurve
     : result?.portfolio.equityCurve;
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
-
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>Backtest</h1>
         <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
-          Replay the London Breakout strategy across multiple pairs and date ranges
+          London Session Breakout — Asian range build, breakout detection, SL/TP/breakeven management
         </p>
       </div>
 
-      {/* ── Config panel ─────────────────────────────────────────────────── */}
       <div className="glass rounded-2xl p-5 space-y-5">
-
         {/* Pairs */}
         <section>
           <SectionLabel>Pairs</SectionLabel>
@@ -143,50 +132,40 @@ export default function BacktestPage() {
             {ALL_PAIRS.map((p) => {
               const on = params.pairs.includes(p);
               return (
-                <button
-                  key={p}
-                  onClick={() => togglePair(p)}
+                <button key={p} onClick={() => togglePair(p)}
                   className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
                   style={{
                     background: on ? `${PAIR_COLORS[p]}18` : "rgba(255,255,255,0.04)",
-                    border:     `1px solid ${on ? PAIR_COLORS[p] + "55" : "var(--border)"}`,
-                    color:      on ? PAIR_COLORS[p] : "var(--text-muted)",
+                    border: `1px solid ${on ? PAIR_COLORS[p] + "55" : "var(--border)"}`,
+                    color: on ? PAIR_COLORS[p] : "var(--text-muted)",
                   }}
-                >
-                  {p.slice(0, 3)}/{p.slice(3)}
-                </button>
+                >{p.slice(0, 3)}/{p.slice(3)}</button>
               );
             })}
-            <button
-              onClick={() => setParams((p) => ({ ...p, pairs: ALL_PAIRS }))}
+            <button onClick={() => setParams((p) => ({ ...p, pairs: ALL_PAIRS }))}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
               style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-muted)" }}
-            >
-              All
-            </button>
+            >All</button>
           </div>
         </section>
 
-        {/* Date range */}
+        {/* Date range + Account */}
         <section>
           <SectionLabel>Date Range</SectionLabel>
           <div className="flex gap-3 mt-2 flex-wrap">
             <DateField label="From" value={params.dateFrom} onChange={(v) => setParams((p) => ({ ...p, dateFrom: v }))} />
-            <DateField label="To"   value={params.dateTo}   onChange={(v) => setParams((p) => ({ ...p, dateTo:   v }))} />
+            <DateField label="To"   value={params.dateTo}   onChange={(v) => setParams((p) => ({ ...p, dateTo: v }))} />
           </div>
         </section>
 
-        {/* Account */}
         <section>
           <SectionLabel>Account</SectionLabel>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-2">
             <NumField label="Starting Balance (AED)" value={params.startingBalanceAED} onChange={setNum("startingBalanceAED")} step="100" />
-            <NumField label="Risk per Trade (%)"     value={params.riskPct}            onChange={setNum("riskPct")}            step="0.1" />
-            <NumField label="Breakeven (× R)"        value={params.breakevenR}         onChange={setNum("breakevenR")}        step="0.25" />
           </div>
         </section>
 
-        {/* Session windows */}
+        {/* LSB Parameters */}
         <section>
           <SectionLabel>Session Windows (GMT)</SectionLabel>
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-4 mt-2">
@@ -198,83 +177,146 @@ export default function BacktestPage() {
           </div>
         </section>
 
-        {/* Filters */}
         <section>
-          <SectionLabel>Entry Filters</SectionLabel>
+          <SectionLabel>Trade Parameters</SectionLabel>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-2">
-            <NumField label="Buffer (pips)"         value={params.bufferPips}    onChange={setNum("bufferPips")}    step="0.5" />
-            <NumField label="TP (× range)"          value={params.tpMultiplier}  onChange={setNum("tpMultiplier")} step="0.25" />
-            <NumField label="Min Range (pips)"      value={params.minRangePips}  onChange={setNum("minRangePips")} />
-            <NumField label="Max Range (pips)"      value={params.maxRangePips}  onChange={setNum("maxRangePips")} />
+            <NumField label="Buffer (pips)"    value={params.bufferPips}   onChange={setNum("bufferPips")}   step="0.5" />
+            <NumField label="TP (x range)"     value={params.tpMultiplier} onChange={setNum("tpMultiplier")} step="0.25" />
+            <NumField label="Min Range (pips)" value={params.minRangePips} onChange={setNum("minRangePips")} />
+            <NumField label="Max Range (pips)" value={params.maxRangePips} onChange={setNum("maxRangePips")} />
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-3">
+            <NumField label="Risk per Trade (%)" value={params.riskPct}    onChange={setNum("riskPct")}    step="0.1" />
+            <NumField label="Breakeven (x R)"    value={params.breakevenR} onChange={setNum("breakevenR")} step="0.25" />
           </div>
         </section>
 
-        {/* Run button */}
-        <button
-          onClick={run}
-          disabled={running || !params.pairs.length}
+        <button onClick={run} disabled={running || !params.pairs.length}
           className="flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-semibold transition-all hover:opacity-90 active:scale-95 disabled:opacity-40"
           style={{ background: "var(--accent)", color: "#000" }}
         >
           {running ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-          {running ? `Running ${params.pairs.length} pair${params.pairs.length > 1 ? "s" : ""}…` : "Run Backtest"}
+          {running ? `Running ${params.pairs.length} pair${params.pairs.length > 1 ? "s" : ""}...` : "Run Backtest"}
         </button>
       </div>
 
-      {/* Error */}
       {error && (
         <div className="rounded-xl px-4 py-3 text-sm" style={{ background: "rgba(255,51,102,0.1)", border: "1px solid rgba(255,51,102,0.3)", color: "var(--red)" }}>
           {error}
         </div>
       )}
 
-      {/* ── Results ──────────────────────────────────────────────────────── */}
       {result && s && (
         <>
-          {/* Data quality note */}
           {result.intervalUsed === "1h" && (
             <div className="rounded-xl px-4 py-2.5 text-xs" style={{ background: "rgba(255,215,0,0.08)", border: "1px solid rgba(255,215,0,0.2)", color: "var(--yellow)" }}>
-              Using 1-hour candles (date range &gt; 58 days). Asian range and breakout detection are slightly less precise than live 15m engine.
+              Using 1-hour candles (date range &gt; 58 days). Detection precision is slightly lower than live 15m engine.
             </div>
           )}
 
-          {/* Portfolio summary cards */}
+          {/* Portfolio summary */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                Portfolio · {result.byPair.filter((r) => r.totalTrades > 0).length} active pair{result.byPair.filter((r) => r.totalTrades > 0).length !== 1 ? "s" : ""}
-              </h2>
-              <div className="flex items-center gap-2">
-                {result && (
-                  <button
-                    onClick={applyToEngine}
-                    disabled={applying || applied}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
-                    style={{
-                      background: applied ? "rgba(0,255,136,0.12)" : "rgba(0,212,255,0.1)",
-                      border:     `1px solid ${applied ? "rgba(0,255,136,0.4)" : "rgba(0,212,255,0.3)"}`,
-                      color:      applied ? "var(--green)" : "var(--accent)",
-                      opacity:    applying ? 0.6 : 1,
-                    }}
-                  >
-                    {applying ? <Loader2 size={12} className="animate-spin" /> : applied ? <CheckCircle2 size={12} /> : <Zap size={12} />}
-                    {applied ? "Applied to Engine" : "Apply Params to Engine"}
-                  </button>
-                )}
-              </div>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <h2 className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Portfolio</h2>
+              <button onClick={applyToEngine} disabled={applying || applied}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                style={{
+                  background: applied ? "rgba(0,255,136,0.12)" : "rgba(0,212,255,0.1)",
+                  border: `1px solid ${applied ? "rgba(0,255,136,0.4)" : "rgba(0,212,255,0.3)"}`,
+                  color: applied ? "var(--green)" : "var(--accent)", opacity: applying ? 0.6 : 1,
+                }}
+              >
+                {applying ? <Loader2 size={12} className="animate-spin" /> : applied ? <CheckCircle2 size={12} /> : <Zap size={12} />}
+                {applied ? "Applied to Engine" : "Apply Params to Engine"}
+              </button>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <StatCard label="Total Trades"  value={String(s.totalTrades)}                                   color="var(--accent)" />
-              <StatCard label="Win Rate"      value={`${s.winRate}%`}                                         color={s.winRate >= 50 ? "var(--green)" : "var(--yellow)"} />
-              <StatCard label="Wins / Losses" value={`${s.wins} / ${s.losses}`}                               color="var(--text-primary)" />
-              <StatCard label="Total Pips"    value={`${s.totalPips >= 0 ? "+" : ""}${s.totalPips}`}         color={s.totalPips >= 0 ? "var(--green)" : "var(--red)"} />
-              <StatCard label="Net P&L"       value={formatAED(s.netPnl, { sign: true })}                    color={s.netPnl >= 0 ? "var(--green)" : "var(--red)"} />
-              <StatCard label="Final Balance" value={formatAED(s.finalBalance)}                               color="var(--accent)" />
-              <StatCard label="Profit Factor" value={pf >= 999 ? "∞" : pf.toFixed(2)}                        color={pf >= 1.5 ? "var(--green)" : pf >= 1 ? "var(--yellow)" : "var(--red)"} />
-              <StatCard label="Max Drawdown"  value={`-${s.maxDrawdown.toFixed(1)}%`}                        color={s.maxDrawdown > 15 ? "var(--red)" : s.maxDrawdown > 8 ? "var(--yellow)" : "var(--green)"} />
+              <StatCard label="Total Trades"  value={String(s.totalTrades)}                          color="var(--accent)" />
+              <StatCard label="Win Rate"      value={`${s.winRate}%`}                                color={s.winRate >= 50 ? "var(--green)" : "var(--yellow)"} />
+              <StatCard label="Wins / Losses" value={`${s.wins} / ${s.losses}`}                      color="var(--text-primary)" />
+              <StatCard label="Total Pips"    value={`${s.totalPips >= 0 ? "+" : ""}${s.totalPips}`} color={s.totalPips >= 0 ? "var(--green)" : "var(--red)"} />
+              <StatCard label="Net P&L"       value={formatAED(s.netPnl, { sign: true })}           color={s.netPnl >= 0 ? "var(--green)" : "var(--red)"} />
+              <StatCard label="Final Balance" value={formatAED(s.finalBalance)}                      color="var(--accent)" />
+              <StatCard label="Profit Factor" value={pf >= 999 ? "∞" : pf.toFixed(2)}               color={pf >= 1.5 ? "var(--green)" : pf >= 1 ? "var(--yellow)" : "var(--red)"} />
+              <StatCard label="Max Drawdown"  value={`-${s.maxDrawdown.toFixed(1)}%`}               color={s.maxDrawdown > 15 ? "var(--red)" : s.maxDrawdown > 8 ? "var(--yellow)" : "var(--green)"} />
             </div>
           </div>
+
+          {/* Advanced Analytics */}
+          {s.advanced && (
+            <div className="glass rounded-2xl p-5 space-y-4">
+              <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Advanced Analytics</div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                <MiniStat label="Return" value={`${s.advanced.returnPct >= 0 ? "+" : ""}${s.advanced.returnPct}%`}
+                  color={s.advanced.returnPct >= 0 ? "var(--green)" : "var(--red)"} />
+                <MiniStat label="Sharpe" value={s.advanced.sharpeRatio.toFixed(2)}
+                  color={s.advanced.sharpeRatio >= 1.5 ? "var(--green)" : s.advanced.sharpeRatio >= 0.5 ? "var(--yellow)" : "var(--red)"} />
+                <MiniStat label="Sortino" value={s.advanced.sortinoRatio.toFixed(2)}
+                  color={s.advanced.sortinoRatio >= 2 ? "var(--green)" : s.advanced.sortinoRatio >= 1 ? "var(--yellow)" : "var(--red)"} />
+                <MiniStat label="Expectancy" value={formatAED(s.advanced.expectancy, { sign: true })}
+                  color={s.advanced.expectancy >= 0 ? "var(--green)" : "var(--red)"} />
+                <MiniStat label="Recovery" value={s.advanced.recoveryFactor.toFixed(2)}
+                  color={s.advanced.recoveryFactor >= 2 ? "var(--green)" : s.advanced.recoveryFactor >= 1 ? "var(--yellow)" : "var(--red)"} />
+                <MiniStat label="Trades/Week" value={s.advanced.avgTradesPerWeek.toFixed(1)} color="var(--accent)" />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                <MiniStat label="Avg Win" value={formatAED(s.advanced.avgWin)} color="var(--green)" />
+                <MiniStat label="Avg Loss" value={formatAED(s.advanced.avgLoss)} color="var(--red)" />
+                <MiniStat label="Avg Win (pips)" value={`+${s.advanced.avgWinPips}`} color="var(--green)" />
+                <MiniStat label="Avg Loss (pips)" value={`${s.advanced.avgLossPips.toFixed(1)}`} color="var(--red)" />
+                <MiniStat label="Best Trade" value={formatAED(s.advanced.largestWin)} color="var(--green)" />
+                <MiniStat label="Worst Trade" value={formatAED(s.advanced.largestLoss)} color="var(--red)" />
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <MiniStat label="Max Win Streak" value={String(s.advanced.maxConsecWins)} color="var(--green)" />
+                <MiniStat label="Max Loss Streak" value={String(s.advanced.maxConsecLosses)}
+                  color={s.advanced.maxConsecLosses >= 5 ? "var(--red)" : s.advanced.maxConsecLosses >= 3 ? "var(--yellow)" : "var(--green)"} />
+              </div>
+
+              {/* Outcome breakdown */}
+              {Object.keys(s.advanced.outcomeBreakdown).length > 0 && (
+                <div>
+                  <div className="text-xs font-medium mb-2" style={{ color: "var(--text-muted)" }}>Exit Type Distribution</div>
+                  <div className="flex gap-2 flex-wrap">
+                    {Object.entries(s.advanced.outcomeBreakdown).map(([outcome, count]) => (
+                      <div key={outcome} className="px-3 py-1.5 rounded-lg text-xs" style={{
+                        background: outcome === "TP" ? "rgba(0,255,136,0.08)" : outcome === "SL" ? "rgba(255,51,102,0.08)" : "rgba(255,215,0,0.08)",
+                        border: `1px solid ${outcome === "TP" ? "rgba(0,255,136,0.2)" : outcome === "SL" ? "rgba(255,51,102,0.2)" : "rgba(255,215,0,0.2)"}`,
+                        color: outcome === "TP" ? "var(--green)" : outcome === "SL" ? "var(--red)" : "var(--yellow)",
+                      }}>
+                        <span className="font-bold">{outcome}</span>
+                        <span className="ml-1.5 opacity-70">{count} ({s.totalTrades > 0 ? Math.round((count / s.totalTrades) * 100) : 0}%)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Monthly P&L */}
+              {s.advanced.monthlyPnl.length > 0 && (
+                <div>
+                  <div className="text-xs font-medium mb-2" style={{ color: "var(--text-muted)" }}>Monthly P&L</div>
+                  <div className="overflow-x-auto">
+                    <div className="flex gap-2">
+                      {s.advanced.monthlyPnl.map((m) => (
+                        <div key={m.month} className="flex-shrink-0 rounded-xl p-3 min-w-[110px]" style={{
+                          background: m.pnl >= 0 ? "rgba(0,255,136,0.06)" : "rgba(255,51,102,0.06)",
+                          border: `1px solid ${m.pnl >= 0 ? "rgba(0,255,136,0.15)" : "rgba(255,51,102,0.15)"}`,
+                        }}>
+                          <div className="text-[10px] font-medium mb-1" style={{ color: "var(--text-muted)" }}>{m.month}</div>
+                          <div className="text-sm font-bold" style={{ color: m.pnl >= 0 ? "var(--green)" : "var(--red)" }}>
+                            {formatAED(m.pnl, { sign: true })}
+                          </div>
+                          <div className="text-[10px] mt-0.5" style={{ color: "var(--text-muted)" }}>{m.trades} trades</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Equity curve */}
           <div className="glass rounded-2xl p-5">
@@ -285,14 +327,10 @@ export default function BacktestPage() {
               <div className="flex gap-1 flex-wrap">
                 <PillBtn active={!activePair} onClick={() => setActivePair(null)}>All Pairs</PillBtn>
                 {result.byPair.filter((r) => r.totalTrades > 0).map((r) => (
-                  <PillBtn
-                    key={r.pair}
-                    active={activePair === r.pair}
+                  <PillBtn key={r.pair} active={activePair === r.pair}
                     onClick={() => setActivePair(activePair === r.pair ? null : r.pair)}
                     color={PAIR_COLORS[r.pair]}
-                  >
-                    {r.pair.slice(0, 3)}/{r.pair.slice(3)}
-                  </PillBtn>
+                  >{r.pair.slice(0, 3)}/{r.pair.slice(3)}</PillBtn>
                 ))}
               </div>
             </div>
@@ -300,24 +338,14 @@ export default function BacktestPage() {
               <LineChart data={showChart}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="date" tick={{ fill: "var(--text-muted)", fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis
-                  tick={{ fill: "var(--text-muted)", fontSize: 10 }} width={100}
-                  tickFormatter={(v) => `AED ${Math.round(v * AED_RATE).toLocaleString("en-AE")}`}
-                />
-                <Tooltip
-                  contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)", fontSize: 12 }}
-                  formatter={(v: unknown) => [formatAED(v as number), "Balance"]}
-                />
-                <ReferenceLine
-                  y={result.startingBalanceUsd}
-                  stroke="rgba(255,255,255,0.12)"
-                  strokeDasharray="4 4"
-                  label={{ value: "Start", fill: "var(--text-muted)", fontSize: 10, position: "insideTopLeft" }}
-                />
-                <Line
-                  type="monotone" dataKey="balance" dot={false} strokeWidth={2}
-                  stroke={activePair ? PAIR_COLORS[activePair] : "var(--accent)"}
-                />
+                <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} width={100}
+                  tickFormatter={(v) => `AED ${Math.round(v * AED_RATE).toLocaleString("en-AE")}`} />
+                <Tooltip contentStyle={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)", fontSize: 12 }}
+                  formatter={(v: unknown) => [formatAED(v as number), "Balance"]} />
+                <ReferenceLine y={result.startingBalanceUsd} stroke="rgba(255,255,255,0.12)" strokeDasharray="4 4"
+                  label={{ value: "Start", fill: "var(--text-muted)", fontSize: 10, position: "insideTopLeft" }} />
+                <Line type="monotone" dataKey="balance" dot={false} strokeWidth={2}
+                  stroke={activePair ? PAIR_COLORS[activePair] : "var(--accent)"} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -327,15 +355,14 @@ export default function BacktestPage() {
             <div className="text-sm font-semibold mb-3" style={{ color: "var(--text-primary)" }}>By Pair</div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {result.byPair.map((r) => (
-                <PairCard key={r.pair} result={r} startUsd={result.startingBalanceUsd} />
+                <PairCard key={r.pair} result={r} />
               ))}
             </div>
           </div>
 
           {/* Trade log */}
           <div className="glass rounded-2xl overflow-hidden">
-            <button
-              onClick={() => setLogOpen((o) => !o)}
+            <button onClick={() => setLogOpen((o) => !o)}
               className="w-full flex items-center justify-between px-5 py-4 text-sm font-semibold"
               style={{ color: "var(--text-primary)", borderBottom: logOpen ? "1px solid var(--border)" : "none" }}
             >
@@ -358,7 +385,7 @@ export default function BacktestPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...result.portfolio.allTrades].reverse().map((t, i) => (
+                    {[...(result.portfolio.allTrades)].reverse().map((t, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
                         <td className="py-1.5 pr-4 font-mono" style={{ color: "var(--text-muted)" }}>{t.date}</td>
                         <td className="py-1.5 pr-4 font-bold text-[10px]" style={{ color: PAIR_COLORS[t.pair] }}>{t.pair.slice(0,3)}/{t.pair.slice(3)}</td>
@@ -391,7 +418,7 @@ export default function BacktestPage() {
   );
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────────
+// ─── Sub-components ──────────────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>{children}</div>;
@@ -406,30 +433,28 @@ function StatCard({ label, value, color }: { label: string; value: string; color
   );
 }
 
-function PairCard({ result: r, startUsd }: { result: PairResult; startUsd: number }) {
+function MiniStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid var(--border)" }}>
+      <div className="text-[9px] uppercase tracking-wide mb-1" style={{ color: "var(--text-muted)" }}>{label}</div>
+      <div className="text-sm font-bold font-mono" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+function PairCard({ result: r }: { result: PairResult }) {
   const color  = PAIR_COLORS[r.pair];
   const gained = r.netPnl >= 0;
   const pf     = r.profitFactor;
 
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${color}22`, background: `${color}08` }}>
-      {/* Header */}
       <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: `1px solid ${color}18` }}>
         <span className="text-xs font-bold" style={{ color }}>{r.pair.slice(0,3)}/{r.pair.slice(3)}</span>
-        {r.totalTrades > 0 ? (
-          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{
-            background: gained ? "rgba(0,255,136,0.12)" : "rgba(255,51,102,0.12)",
-            color:      gained ? "var(--green)" : "var(--red)",
-          }}>
-            {formatAED(r.netPnl, { sign: true })}
-          </span>
-        ) : (
-          <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>No data</span>
-        )}
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{r.totalTrades} trades</span>
       </div>
-      {/* Stats */}
       <div className="px-3 py-2.5 space-y-1.5">
-        <MiniRow label="Trades"   value={String(r.totalTrades)} />
+        <MiniRow label="Net P&L" value={r.totalTrades > 0 ? formatAED(r.netPnl, { sign: true }) : "—"} color={gained ? "var(--green)" : "var(--red)"} />
         <MiniRow label="Win Rate" value={r.totalTrades > 0 ? `${r.winRate}%` : "—"} color={r.winRate >= 50 ? "var(--green)" : r.winRate > 0 ? "var(--yellow)" : "var(--text-muted)"} />
         <MiniRow label="P.Factor" value={r.totalTrades > 0 ? (pf >= 999 ? "∞" : pf.toFixed(2)) : "—"} color={pf >= 1.5 ? "var(--green)" : pf >= 1 ? "var(--yellow)" : pf > 0 ? "var(--red)" : "var(--text-muted)"} />
         <MiniRow label="Max DD"   value={r.totalTrades > 0 ? `-${r.maxDrawdown.toFixed(1)}%` : "—"} color={r.maxDrawdown > 15 ? "var(--red)" : r.maxDrawdown > 8 ? "var(--yellow)" : "var(--green)"} />
@@ -449,17 +474,14 @@ function MiniRow({ label, value, color = "var(--text-primary)" }: { label: strin
 
 function PillBtn({ children, active, onClick, color = "var(--accent)" }: { children: React.ReactNode; active: boolean; onClick: () => void; color?: string }) {
   return (
-    <button
-      onClick={onClick}
+    <button onClick={onClick}
       className="px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all"
       style={{
         background: active ? `${color}18` : "transparent",
-        border:     `1px solid ${active ? color + "44" : "var(--border)"}`,
-        color:      active ? color : "var(--text-muted)",
+        border: `1px solid ${active ? color + "44" : "var(--border)"}`,
+        color: active ? color : "var(--text-muted)",
       }}
-    >
-      {children}
-    </button>
+    >{children}</button>
   );
 }
 
@@ -467,8 +489,7 @@ function NumField({ label, value, onChange, step = "1" }: { label: string; value
   return (
     <div>
       <label className="block text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>{label}</label>
-      <input
-        type="number" value={value} step={step}
+      <input type="number" value={value} step={step}
         onChange={(e) => onChange(e.target.value)}
         className="w-full rounded-xl px-3 py-2 text-sm outline-none"
         style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
@@ -483,8 +504,7 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   return (
     <div>
       <label className="block text-xs mb-1.5" style={{ color: "var(--text-muted)" }}>{label}</label>
-      <input
-        type="date" value={value}
+      <input type="date" value={value}
         onChange={(e) => onChange(e.target.value)}
         className="rounded-xl px-3 py-2 text-sm outline-none"
         style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-primary)", colorScheme: "dark" }}

@@ -1,28 +1,12 @@
 /**
- * KAIROS FX — London Breakout Strategy Engine
+ * MERIDIAN — London Session Breakout (LSB)
  *
- * Logic flow (runs every minute):
+ * Phase 1: Asian Range Build (02:00–07:00 GMT)
+ * Phase 2: Breakout Detection (08:00–10:00 GMT)
+ * Phase 3: Trade Management (SL/TP/breakeven/cutoff)
  *
- * Phase 1 — Asian Range Build (02:00–07:00 GMT)
- *   Fetch 15m candles, scan the Asian window, record the session high/low.
- *
- * Phase 2 — Breakout Detection (08:00–10:00 GMT)
- *   Look at each 15m candle that CLOSED inside the breakout window.
- *   If close > (asianHigh + buffer) → LONG candidate
- *   If close < (asianLow  - buffer) → SHORT candidate
- *   Run full risk gate. If all checks pass → open paper trade + notify.
- *
- * Phase 3 — Trade Management (ongoing)
- *   For every open London-Breakout trade:
- *   - If price hit TP → close profitable
- *   - If price hit SL → close at loss
- *   - If 1R in profit and SL not already at breakeven → move SL to entry
- *   - If time >= cutoff (12:00 GMT) → force-close
- *
- * Loss-minimisation embedded at every phase:
- *   - Range size guard (Phase 1)
- *   - Full risk gate before any entry (Phase 2)
- *   - Breakeven move, TP/SL management, time cutoff (Phase 3)
+ * Risk management: circuit breakers, portfolio heat,
+ * correlation filter, drawdown scaling. Flattens by session close.
  */
 
 import {
@@ -115,7 +99,7 @@ async function updateAsianRange(pair: string, today: string, asianStart: number,
   updateSession(pair, today, { asian_high: high, asian_low: low, range_pips: rangePips });
 }
 
-// ─── Phase 2: Detect breakout ─────────────────────────────────────────────────
+// ─── Phase 2: Detect breakout ───────────────────────────────────────────────
 async function checkBreakout(
   pair: string,
   today: string,
@@ -129,7 +113,6 @@ async function checkBreakout(
   const candles = await fetchCandles(pair, "15m", "5d");
   if (!candles.length) return "no candle data";
 
-  // Candles that CLOSED inside the breakout window today
   const breakoutCandles = candles.filter((c) => {
     const h = candleGmtHour(c.time);
     const d = candleDateStr(c.time);
@@ -166,15 +149,13 @@ async function checkBreakout(
 
     if (!direction) continue;
 
-    // Run full risk gate
     const risk = runRiskChecks(pair, direction, entry!, sl!, session.asian_high, session.asian_low, today);
     if (!risk.ok) {
-      stratLog("RISK", `[${pair}] Blocked: ${risk.reason}`, pair);
+      stratLog("RISK", `[${pair}] blocked: ${risk.reason}`, pair);
       updateSession(pair, today, { skipped_reason: risk.reason ?? null });
       return risk.reason ?? "risk check failed";
     }
 
-    // Optional: trend filter (H4 last close direction)
     if (getSetting("strategy_trend_filter") === "true") {
       const h4Candles = await fetchCandles(pair, "1h", "30d");
       if (h4Candles.length >= 4) {
@@ -197,7 +178,6 @@ async function checkBreakout(
       }
     }
 
-    // False breakout guard: check if the opposite side was also broken today
     const bothBroken = breakoutCandles.some((bc) => bc.close < session.asian_low! - buffer)
                     && breakoutCandles.some((bc) => bc.close > session.asian_high! + buffer);
     if (bothBroken) {
@@ -207,55 +187,47 @@ async function checkBreakout(
       return msg;
     }
 
-    // Calculate position size (drawdown-scaled)
     const lot = scaledLotSize(balance, startBal, riskPct, entry!, sl!, pair);
 
-    // Open the paper trade
     openTrade({
       pair, direction, entry_price: entry!, stop_loss: sl!, take_profit: tp!,
       lot_size: lot, signal_source: "LONDON_BREAKOUT",
     });
 
-    // Record signal
     const sigResult = insertSignal({
       pair, direction, timeframe: "15m",
       entry_price: entry!, stop_loss: sl!, take_profit: tp!,
     });
     markSignalExecuted(Number(sigResult.lastInsertRowid));
 
-    // Mark session as fired
     updateSession(pair, today, { signal_fired: 1, breakout_direction: direction });
 
-    // Notify
     notifySetup({ pair, direction, entry_price: entry!, window: "15m" });
     const emoji = direction === "LONG" ? "📈" : "📉";
     sendIMessage(
-      `${emoji} KAIROS FX — LONDON BREAKOUT\n${pair} ${direction}\nEntry: ${entry!.toFixed(5)} | SL: ${sl!.toFixed(5)} | TP: ${tp!.toFixed(5)}\nRange: ${toPips(session.asian_high, session.asian_low, pair).toFixed(1)} pips | Lot: ${lot}\nRisk: ${formatAED(balance * (riskPct / 100))}`
+      `${emoji} MERIDIAN — BREAKOUT\n${pair} ${direction}\nEntry: ${entry!.toFixed(5)} | SL: ${sl!.toFixed(5)} | TP: ${tp!.toFixed(5)}\nRange: ${toPips(session.asian_high, session.asian_low, pair).toFixed(1)} pips | Lot: ${lot}\nRisk: ${formatAED(balance * (riskPct / 100))}`
     );
     stratLog("SIGNAL", `[${pair}] ${direction} @ ${entry!.toFixed(5)} SL:${sl!.toFixed(5)} TP:${tp!.toFixed(5)} lot:${lot}`, pair);
 
-    return null; // success
+    return null;
   }
 
   return "no confirmed breakout candle yet";
 }
 
-// ─── Phase 3: Manage open trades ──────────────────────────────────────────────
+// ─── Trade Management ───────────────────────────────────────────────────────
 async function manageOpenTrades(today: string, cutoffHour: number) {
   const openTrades = getOpenTrades() as OpenTrade[];
-  const lbTrades = openTrades.filter((t) => t.signal_source === "LONDON_BREAKOUT");
-  if (!lbTrades.length) return;
+  if (!openTrades.length) return;
 
-  const { hour, hourDecimal } = nowGmt();
+  const { hourDecimal } = nowGmt();
   const riskState = getOrCreateRiskState(today);
-  const startBal  = parseFloat(getSetting("paper_balance") || "10000");
 
-  for (const trade of lbTrades) {
+  for (const trade of openTrades) {
     const pair = trade.pair.replace("/", "");
     const candles = await fetchCandles(pair, "15m", "5d");
     if (!candles.length) continue;
 
-    // The most recently CLOSED 15m candle (not the current forming one)
     const closedCandles = candles.filter((c) => {
       const h = candleGmtHour(c.time);
       return candleDateStr(c.time) === today && h < hourDecimal - 0.25;
@@ -265,21 +237,17 @@ async function manageOpenTrades(today: string, cutoffHour: number) {
     const latest = closedCandles[closedCandles.length - 1];
     const isLong = trade.direction === "LONG";
 
-    // Check SL hit (use candle low/high to simulate realistic fill)
     const slHit = isLong
       ? latest.low  <= trade.stop_loss
       : latest.high >= trade.stop_loss;
 
-    // Check TP hit
-    const tpHit = isLong
-      ? latest.high >= trade.take_profit
-      : latest.low  <= trade.take_profit;
+    const tpHit = trade.take_profit
+      ? (isLong ? latest.high >= trade.take_profit : latest.low <= trade.take_profit)
+      : false;
 
-    // Time cutoff
     const cutoffHit = hourDecimal >= cutoffHour;
 
     if (slHit && !tpHit) {
-      // SL fill — assume worst case (SL price, not candle close)
       const closePrice = trade.stop_loss;
       const { pnl, pips } = calcPnl(trade.direction, trade.entry_price, closePrice, trade.lot_size, pair);
       closeTrade(trade.id, closePrice, pnl, pips);
@@ -289,7 +257,7 @@ async function manageOpenTrades(today: string, cutoffHour: number) {
         daily_trades: riskState.daily_trades + 1,
         consecutive_losses: newConsec,
       });
-      sendIMessage(`🔴 KAIROS FX — SL HIT\n${trade.pair} ${trade.direction}\nLoss: ${formatAED(pnl)} (${pips.toFixed(1)} pips)\nConsecutive losses: ${newConsec}`);
+      sendIMessage(`🔴 MERIDIAN — SL HIT\n${trade.pair} ${trade.direction}\nLoss: ${formatAED(pnl)} (${pips.toFixed(1)} pips)\nConsecutive losses: ${newConsec}`);
       stratLog("TRADE", `[${trade.pair}] SL hit — P&L ${formatAED(pnl)} | ${pips.toFixed(1)} pips`, trade.pair);
       try { computeInsights(); } catch { /* non-blocking */ }
     } else if (tpHit) {
@@ -299,13 +267,12 @@ async function manageOpenTrades(today: string, cutoffHour: number) {
       updateRiskState(today, {
         daily_pnl: riskState.daily_pnl + pnl,
         daily_trades: riskState.daily_trades + 1,
-        consecutive_losses: 0, // reset streak on a win
+        consecutive_losses: 0,
       });
-      sendIMessage(`✅ KAIROS FX — TP HIT\n${trade.pair} ${trade.direction}\nProfit: ${formatAED(pnl, { sign: true })} (+${pips.toFixed(1)} pips)`);
+      sendIMessage(`✅ MERIDIAN — TP HIT\n${trade.pair} ${trade.direction}\nProfit: ${formatAED(pnl, { sign: true })} (+${pips.toFixed(1)} pips)`);
       stratLog("TRADE", `[${trade.pair}] TP hit — P&L ${formatAED(pnl, { sign: true })} | +${pips.toFixed(1)} pips`, trade.pair);
       try { computeInsights(); } catch { /* non-blocking */ }
     } else if (cutoffHit) {
-      // Force close at market (use latest candle close as proxy)
       const closePrice = latest.close;
       const { pnl, pips } = calcPnl(trade.direction, trade.entry_price, closePrice, trade.lot_size, pair);
       closeTrade(trade.id, closePrice, pnl, pips);
@@ -316,11 +283,11 @@ async function manageOpenTrades(today: string, cutoffHour: number) {
         consecutive_losses: newConsec,
       });
       const icon = pnl >= 0 ? "✅" : "🟡";
-      sendIMessage(`${icon} KAIROS FX — TIME CUTOFF\n${trade.pair} ${trade.direction} closed at ${cutoffHour}:00 GMT\nP&L: ${formatAED(pnl, { sign: true })}`);
+      sendIMessage(`${icon} MERIDIAN — TIME CUTOFF\n${trade.pair} ${trade.direction} closed at ${cutoffHour}:00 GMT\nP&L: ${formatAED(pnl, { sign: true })}`);
       stratLog("TRADE", `[${trade.pair}] Time cutoff close — P&L ${formatAED(pnl, { sign: true })}`, trade.pair);
       try { computeInsights(); } catch { /* non-blocking */ }
     } else {
-      // Still live — check breakeven rule
+      // Breakeven rule
       const breakevenR  = parseFloat(getSetting("strategy_breakeven_r") || "1");
       const riskPips    = toPips(trade.entry_price, trade.stop_loss, pair);
       const targetPips  = riskPips * breakevenR;
@@ -331,7 +298,7 @@ async function manageOpenTrades(today: string, cutoffHour: number) {
       const slAlreadyAtEntry = Math.abs(trade.stop_loss - trade.entry_price) < pipSize(pair) * 2;
       if (currentPips >= targetPips && !slAlreadyAtEntry) {
         updateTradeStopLoss(trade.id, trade.entry_price);
-        sendIMessage(`🔐 KAIROS FX — BREAKEVEN\n${trade.pair} ${trade.direction}\nSL moved to entry at ${trade.entry_price.toFixed(5)} (${currentPips.toFixed(1)} pips in profit)`);
+        sendIMessage(`🔐 MERIDIAN — BREAKEVEN\n${trade.pair} ${trade.direction}\nSL moved to entry at ${trade.entry_price.toFixed(5)} (${currentPips.toFixed(1)} pips in profit)`);
         stratLog("TRADE", `[${trade.pair}] Breakeven triggered — SL moved to ${trade.entry_price.toFixed(5)}`, trade.pair);
       }
     }
@@ -354,7 +321,6 @@ export async function runStrategyTick(): Promise<TickResult> {
 
   const { hourDecimal, dateStr, dayOfWeek } = nowGmt();
 
-  // Forex weekend: Saturday all day, Sunday before 22:00 UTC, Friday after 22:00 UTC
   const isWeekend =
     dayOfWeek === 6 ||
     (dayOfWeek === 0 && hourDecimal < 22) ||
@@ -402,9 +368,9 @@ export async function runStrategyTick(): Promise<TickResult> {
     }
   }
 
-  if (phase === "BREAKOUT_WATCH" || phase === "MANAGING") {
-    await manageOpenTrades(dateStr, cutoffHour);
-  }
+  await manageOpenTrades(dateStr, cutoffHour);
+
+  stratLog("INFO", `Tick complete — phase: ${phase}`);
 
   return {
     time: new Date().toISOString(),

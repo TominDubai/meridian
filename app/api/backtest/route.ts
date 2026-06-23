@@ -28,6 +28,25 @@ export type BtTrade = {
   lotSize: number; rangePips: number;
 };
 
+export type AdvancedStats = {
+  sharpeRatio:       number;
+  sortinoRatio:      number;
+  avgWin:            number;
+  avgLoss:           number;
+  avgWinPips:        number;
+  avgLossPips:       number;
+  largestWin:        number;
+  largestLoss:       number;
+  expectancy:        number;
+  recoveryFactor:    number;
+  returnPct:         number;
+  maxConsecWins:     number;
+  maxConsecLosses:   number;
+  avgTradesPerWeek:  number;
+  outcomeBreakdown:  Record<string, number>;
+  monthlyPnl:        { month: string; pnl: number; trades: number }[];
+};
+
 export type PairResult = {
   pair:         string;
   totalTrades:  number;
@@ -55,7 +74,10 @@ export type PortfolioSummary = {
   profitFactor: number;
   skippedDays:  number;
   finalBalance: number;
+  advanced:     AdvancedStats;
 };
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function candleHour(ts: number): number {
   const d = new Date(ts * 1000);
@@ -75,7 +97,7 @@ async function fetchCandles(pair: string, p1: number, p2: number, interval: stri
       const json = await res.json();
       const r    = json?.chart?.result?.[0];
       if (!r) return [];
-      const ts: number[]                     = r.timestamp ?? [];
+      const ts: number[] = r.timestamp ?? [];
       const { open, high, low, close } = r.indicators.quote[0];
       return ts
         .map((t, i) => ({ time: t, open: open[i], high: high[i], low: low[i], close: close[i] }))
@@ -88,10 +110,12 @@ async function fetchCandles(pair: string, p1: number, p2: number, interval: stri
   return [];
 }
 
+// ─── Pair Backtest ────────────────────────────────────────────────────────────
+
 function runPairBacktest(
-  pair:             string,
-  candles:          Candle[],
-  params:           BacktestParams,
+  pair:               string,
+  candles:            Candle[],
+  params:             BacktestParams,
   startingBalanceUsd: number
 ): PairResult {
   const {
@@ -103,29 +127,28 @@ function runPairBacktest(
   const buffer = fromPips(bufferPips, pair);
   const ps     = pipSize(pair);
 
-  // Filter to requested date range
   const filtered = candles.filter((c) => {
     const d = candleDate(c.time);
     return d >= dateFrom && d <= dateTo;
   });
 
-  // Group by date
   const byDate: Record<string, Candle[]> = {};
   for (const c of filtered) {
     const d = candleDate(c.time);
     (byDate[d] ??= []).push(c);
   }
 
-  const trades: BtTrade[]                        = [];
-  let balance                                     = startingBalanceUsd;
+  const trades: BtTrade[] = [];
+  let balance = startingBalanceUsd;
   const equityCurve: { date: string; balance: number }[] = [{ date: "Start", balance }];
-  let skippedDays                                 = 0;
+  let skippedDays = 0;
 
   for (const date of Object.keys(byDate).sort()) {
     const dow = new Date(date + "T12:00:00Z").getUTCDay();
     if (dow === 0 || dow === 5 || dow === 6) continue;
 
     const day = byDate[date].sort((a, b) => a.time - b.time);
+    if (!day.length) continue;
 
     const asianC = day.filter((c) => { const h = candleHour(c.time); return h >= asianStart && h < asianEnd; });
     if (!asianC.length) { skippedDays++; continue; }
@@ -147,31 +170,30 @@ function runPairBacktest(
 
     for (const c of boC) {
       if (c.close > rangeHigh + buffer) {
-        direction = "LONG";  entry = rangeHigh + buffer; sl = rangeLow  - buffer; tp = entry + (rangeHigh - rangeLow) * tpMultiplier; break;
+        direction = "LONG"; entry = rangeHigh + buffer; sl = rangeLow - buffer; tp = entry + (rangeHigh - rangeLow) * tpMultiplier; break;
       } else if (c.close < rangeLow - buffer) {
-        direction = "SHORT"; entry = rangeLow  - buffer; sl = rangeHigh + buffer; tp = entry - (rangeHigh - rangeLow) * tpMultiplier; break;
+        direction = "SHORT"; entry = rangeLow - buffer; sl = rangeHigh + buffer; tp = entry - (rangeHigh - rangeLow) * tpMultiplier; break;
       }
     }
+
     if (!direction) { skippedDays++; continue; }
 
     const lot    = scaledLotSize(balance, startingBalanceUsd, riskPct, entry, sl, pair);
     const isLong = direction === "LONG";
-
-    const mgmt      = day.filter((c) => candleHour(c.time) >= breakoutStart);
+    const mgmt   = day.filter((c) => candleHour(c.time) >= breakoutStart);
     let outcome: "TP" | "SL" | "CUTOFF" = "CUTOFF";
-    let closePrice  = mgmt.at(-1)?.close ?? entry;
-    let currentSl   = sl;
+    let closePrice = mgmt.at(-1)?.close ?? entry;
+    let currentSl  = sl;
 
     for (const c of mgmt) {
-      const slHit = isLong ? c.low  <= currentSl : c.high >= currentSl;
-      const tpHit = isLong ? c.high >= tp        : c.low  <= tp;
+      const slHit = isLong ? c.low <= currentSl : c.high >= currentSl;
+      const tpHit = isLong ? c.high >= tp : c.low <= tp;
       if (slHit && !tpHit) { outcome = "SL"; closePrice = currentSl; break; }
-      if (tpHit)            { outcome = "TP"; closePrice = tp; break; }
+      if (tpHit) { outcome = "TP"; closePrice = tp; break; }
       if (candleHour(c.time) >= cutoffHour) { outcome = "CUTOFF"; closePrice = c.close; break; }
-      // Breakeven
       const inPips   = isLong ? (c.close - entry) / ps : (entry - c.close) / ps;
-      const riskPips = toPips(entry, currentSl, pair) * breakevenR;
-      if (inPips >= riskPips && Math.abs(currentSl - entry) > ps * 2) currentSl = entry;
+      const riskPipsVal = toPips(entry, currentSl, pair) * breakevenR;
+      if (inPips >= riskPipsVal && Math.abs(currentSl - entry) > ps * 2) currentSl = entry;
     }
 
     const { pnl, pips } = calcPnl(direction, entry, closePrice, lot, pair);
@@ -210,6 +232,93 @@ function runPairBacktest(
   };
 }
 
+// ─── Advanced Stats ──────────────────────────────────────────────────────────
+
+function computeAdvancedStats(
+  trades: BtTrade[],
+  startUsd: number,
+  maxDrawdownPct: number,
+): AdvancedStats {
+  const wins = trades.filter((t) => t.pnl > 0);
+  const losses = trades.filter((t) => t.pnl <= 0);
+
+  const avgWin     = wins.length   ? wins.reduce((s, t) => s + t.pnl, 0) / wins.length     : 0;
+  const avgLoss    = losses.length ? losses.reduce((s, t) => s + t.pnl, 0) / losses.length  : 0;
+  const avgWinPips  = wins.length   ? wins.reduce((s, t) => s + t.pips, 0) / wins.length    : 0;
+  const avgLossPips = losses.length ? losses.reduce((s, t) => s + t.pips, 0) / losses.length : 0;
+  const largestWin  = wins.length   ? Math.max(...wins.map((t) => t.pnl))   : 0;
+  const largestLoss = losses.length ? Math.min(...losses.map((t) => t.pnl)) : 0;
+
+  const winRate    = trades.length ? wins.length / trades.length : 0;
+  const expectancy = trades.length ? (winRate * avgWin + (1 - winRate) * avgLoss) : 0;
+
+  const netPnl        = trades.reduce((s, t) => s + t.pnl, 0);
+  const returnPct     = startUsd > 0 ? (netPnl / startUsd) * 100 : 0;
+  const recoveryFactor = maxDrawdownPct > 0 ? returnPct / maxDrawdownPct : 0;
+
+  const dailyPnl: Record<string, number> = {};
+  for (const t of trades) dailyPnl[t.date] = (dailyPnl[t.date] ?? 0) + t.pnl;
+  const dailyReturns = Object.values(dailyPnl);
+  const meanReturn   = dailyReturns.length ? dailyReturns.reduce((s, v) => s + v, 0) / dailyReturns.length : 0;
+  const variance     = dailyReturns.length > 1
+    ? dailyReturns.reduce((s, v) => s + (v - meanReturn) ** 2, 0) / (dailyReturns.length - 1)
+    : 0;
+  const stdDev       = Math.sqrt(variance);
+  const sharpeRatio  = stdDev > 0 ? (meanReturn / stdDev) * Math.sqrt(252) : 0;
+
+  const downside     = dailyReturns.filter((r) => r < 0);
+  const downVar      = downside.length > 1
+    ? downside.reduce((s, v) => s + v ** 2, 0) / (downside.length - 1)
+    : 0;
+  const downDev      = Math.sqrt(downVar);
+  const sortinoRatio = downDev > 0 ? (meanReturn / downDev) * Math.sqrt(252) : 0;
+
+  let maxConsecWins = 0, maxConsecLosses = 0, cw = 0, cl = 0;
+  for (const t of trades) {
+    if (t.pnl > 0) { cw++; cl = 0; if (cw > maxConsecWins) maxConsecWins = cw; }
+    else           { cl++; cw = 0; if (cl > maxConsecLosses) maxConsecLosses = cl; }
+  }
+
+  const dates = [...new Set(trades.map((t) => t.date))].sort();
+  const tradingDays = dates.length;
+  const avgTradesPerWeek = tradingDays > 0 ? (trades.length / tradingDays) * 5 : 0;
+
+  const outcomeBreakdown: Record<string, number> = {};
+  for (const t of trades) outcomeBreakdown[t.outcome] = (outcomeBreakdown[t.outcome] ?? 0) + 1;
+
+  const monthMap: Record<string, { pnl: number; trades: number }> = {};
+  for (const t of trades) {
+    const month = t.date.slice(0, 7);
+    if (!monthMap[month]) monthMap[month] = { pnl: 0, trades: 0 };
+    monthMap[month].pnl += t.pnl;
+    monthMap[month].trades++;
+  }
+  const monthlyPnl = Object.entries(monthMap)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, d]) => ({ month, pnl: parseFloat(d.pnl.toFixed(2)), trades: d.trades }));
+
+  return {
+    sharpeRatio:  parseFloat(sharpeRatio.toFixed(2)),
+    sortinoRatio: parseFloat(sortinoRatio.toFixed(2)),
+    avgWin:       parseFloat(avgWin.toFixed(2)),
+    avgLoss:      parseFloat(avgLoss.toFixed(2)),
+    avgWinPips:   parseFloat(avgWinPips.toFixed(1)),
+    avgLossPips:  parseFloat(avgLossPips.toFixed(1)),
+    largestWin:   parseFloat(largestWin.toFixed(2)),
+    largestLoss:  parseFloat(largestLoss.toFixed(2)),
+    expectancy:   parseFloat(expectancy.toFixed(2)),
+    recoveryFactor: parseFloat(recoveryFactor.toFixed(2)),
+    returnPct:    parseFloat(returnPct.toFixed(2)),
+    maxConsecWins,
+    maxConsecLosses,
+    avgTradesPerWeek: parseFloat(avgTradesPerWeek.toFixed(1)),
+    outcomeBreakdown,
+    monthlyPnl,
+  };
+}
+
+// ─── API Handler ──────────────────────────────────────────────────────────────
+
 export async function POST(req: Request) {
   let params: BacktestParams;
   try { params = await req.json(); }
@@ -224,10 +333,8 @@ export async function POST(req: Request) {
   const daysDiff = (p2 - p1) / 86400;
   const interval = daysDiff <= 58 ? "15m" : "1h";
 
-  // Fetch all pairs in parallel
   const candlesByPair = await Promise.all(pairs.map((p) => fetchCandles(p, p1, p2, interval)));
 
-  // Run each pair
   const byPair: PairResult[] = pairs.map((pair, i) => {
     if (!candlesByPair[i].length) {
       return {
@@ -240,7 +347,6 @@ export async function POST(req: Request) {
     return runPairBacktest(pair, candlesByPair[i], params, startUsd);
   });
 
-  // Portfolio: combine all P&L streams chronologically
   const dailyPnl: Record<string, number> = {};
   for (const pr of byPair)
     for (const t of pr.trades)
@@ -264,7 +370,9 @@ export async function POST(req: Request) {
   const portGW     = portWins.reduce((s, t) => s + t.pnl, 0);
   const portGL     = Math.abs(portLosses.reduce((s, t) => s + t.pnl, 0));
 
-  const portfolio: { summary: PortfolioSummary; equityCurve: typeof portfolioEquity; allTrades: BtTrade[] } = {
+  const advanced = computeAdvancedStats(allTrades, startUsd, portMaxDd);
+
+  const portfolio = {
     summary: {
       totalTrades:  allTrades.length,
       wins:         portWins.length,
@@ -276,6 +384,7 @@ export async function POST(req: Request) {
       profitFactor: portGL > 0 ? parseFloat((portGW / portGL).toFixed(2)) : portGW > 0 ? 999 : 0,
       skippedDays:  byPair.reduce((s, r) => s + r.skippedDays, 0),
       finalBalance: parseFloat(portBal.toFixed(2)),
+      advanced,
     },
     equityCurve:  portfolioEquity,
     allTrades,

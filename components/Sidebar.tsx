@@ -6,11 +6,11 @@ import {
   TrendingUp,
   BarChart3,
   Settings,
-  Zap,
   CandlestickChart,
   Bot,
   History,
 } from "lucide-react";
+import MeridianLogo from "./MeridianLogo";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -26,56 +26,60 @@ export default function Sidebar() {
   const path = usePathname();
   return (
     <aside
-      className="flex flex-col w-[220px] min-h-screen shrink-0 glass"
-      style={{ borderRight: "1px solid var(--border)", borderRadius: 0 }}
+      className="flex flex-col w-[220px] min-h-screen shrink-0"
+      style={{
+        background: "var(--bg-card)",
+        borderRight: "1px solid var(--border)",
+      }}
     >
       {/* Logo */}
-      <div className="px-6 pt-8 pb-6">
-        <div className="flex items-center gap-2">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: "var(--accent-dim)", border: "1px solid var(--accent)" }}
+      <div className="px-5 pt-7 pb-1">
+        <div className="flex items-center gap-2.5">
+          <MeridianLogo size={32} />
+          <span
+            className="text-[15px] font-bold tracking-tight"
+            style={{ color: "var(--text-primary)" }}
           >
-            <Zap size={16} style={{ color: "var(--accent)" }} />
-          </div>
-          <div>
-            <div className="text-sm font-bold tracking-widest" style={{ color: "var(--accent)" }}>
-              KAIROS
-            </div>
-            <div className="text-[10px] tracking-widest" style={{ color: "var(--text-muted)" }}>
-              FX
-            </div>
-          </div>
+            Meridian
+          </span>
         </div>
       </div>
 
-      {/* Live badge */}
-      <div className="px-6 mb-6">
+      {/* Status */}
+      <div className="px-5 py-4">
         <div
-          className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs"
-          style={{ background: "rgba(0,255,136,0.08)", border: "1px solid rgba(0,255,136,0.2)", color: "var(--green)", width: "fit-content" }}
+          className="flex items-center gap-2 text-[10px] font-semibold tracking-widest uppercase"
+          style={{ color: "var(--accent)" }}
         >
-          <span className="w-1.5 h-1.5 rounded-full live-dot" style={{ background: "var(--green)" }} />
-          PAPER TRADING
+          <span
+            className="w-1.5 h-1.5 rounded-full live-dot"
+            style={{ background: "var(--accent)" }}
+          />
+          Paper
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3">
+      <nav className="flex-1 px-2.5">
         {nav.map(({ href, label, icon: Icon }) => {
           const active = path === href;
           return (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-all"
+              className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg mb-px text-[13px] transition-colors"
               style={{
-                color: active ? "var(--accent)" : "var(--text-muted)",
+                color: active ? "var(--text-primary)" : "var(--text-secondary)",
                 background: active ? "var(--accent-dim)" : "transparent",
-                border: active ? "1px solid rgba(0,212,255,0.2)" : "1px solid transparent",
+                fontWeight: active ? 600 : 400,
+                cursor: "pointer",
               }}
             >
-              <Icon size={16} />
+              <Icon
+                size={15}
+                strokeWidth={active ? 2.2 : 1.8}
+                style={{ color: active ? "var(--accent)" : "var(--text-muted)" }}
+              />
               {label}
             </Link>
           );
@@ -83,9 +87,12 @@ export default function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="px-6 py-5">
-        <div className="text-[10px] tracking-widest" style={{ color: "var(--text-muted)" }}>
-          v1.0.0 · PAPER MODE
+      <div className="px-5 py-4">
+        <div
+          className="text-[10px] tracking-wide"
+          style={{ color: "var(--text-muted)", fontFamily: "var(--font-data)" }}
+        >
+          v2.0.0
         </div>
       </div>
     </aside>

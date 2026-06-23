@@ -87,7 +87,7 @@ export default function StrategyPage() {
             Strategy Engine
           </h1>
           <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>
-            London Breakout · Fully automated · Paper trading
+            London Session Breakout · Asian range build · Breakout detection · Paper trading
           </p>
         </div>
 
