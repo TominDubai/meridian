@@ -23,9 +23,11 @@ import {
   getOpenTrades,
   insertSignal,
   markSignalExecuted,
+  insertIbkrOrder,
   stratLog,
   StrategySession,
 } from "./db";
+import { placeIbkrOrder, lotsToUnits } from "./ibkr-order";
 import { runRiskChecks, calcLotSize, scaledLotSize, calcPnl, toPips, fromPips, pipSize } from "./risk";
 import { formatAED } from "./currency";
 import { notifySetup, sendIMessage } from "./notify";
@@ -189,10 +191,38 @@ async function checkBreakout(
 
     const lot = scaledLotSize(balance, startBal, riskPct, entry!, sl!, pair);
 
-    openTrade({
+    const tradeResult = openTrade({
       pair, direction, entry_price: entry!, stop_loss: sl!, take_profit: tp!,
       lot_size: lot, signal_source: "LONDON_BREAKOUT",
     });
+
+    if (getSetting("ibkr_live_enabled") === "true") {
+      const liveLots = parseFloat(getSetting("ibkr_lot_size") || "0.1");
+      try {
+        const ibkrResult = await placeIbkrOrder({
+          pair, direction,
+          quantity:   lotsToUnits(liveLots),
+          stopLoss:   sl!,
+          takeProfit: tp!,
+        });
+        insertIbkrOrder({
+          ibkr_order_id: ibkrResult.parentOrderId,
+          pair, direction,
+          order_type:  "MKT",
+          quantity:    lotsToUnits(liveLots),
+          limit_price: null,
+          stop_loss:   sl!,
+          take_profit: tp!,
+          status:      ibkrResult.status,
+          filled_price: null,
+          error_msg:   null,
+          trade_id:    Number(tradeResult.lastInsertRowid),
+        });
+        stratLog("TRADE", `[${pair}] IBKR live order submitted: id=${ibkrResult.parentOrderId} (${ibkrResult.status})`, pair);
+      } catch (e) {
+        stratLog("WARN", `[${pair}] IBKR live order failed — paper trade recorded: ${e}`, pair);
+      }
+    }
 
     const sigResult = insertSignal({
       pair, direction, timeframe: "15m",

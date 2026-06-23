@@ -13,6 +13,10 @@ import {
   Shield,
   Crosshair,
   Building2,
+  Plus,
+  X,
+  Send,
+  Ban,
 } from "lucide-react";
 import { formatAED } from "@/lib/currency";
 import {
@@ -60,6 +64,21 @@ type IbkrData = {
   positions: IbkrPosition[];
 };
 
+type IbkrOrder = {
+  id: number;
+  ibkr_order_id: number | null;
+  pair: string;
+  direction: string;
+  order_type: string;
+  quantity: number;
+  stop_loss: number | null;
+  take_profit: number | null;
+  status: string;
+  filled_price: number | null;
+  error_msg: string | null;
+  created_at: number;
+};
+
 const PAIRS = ["EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD"];
 
 const mockPrices: Record<string, number> = {
@@ -98,20 +117,23 @@ export default function Dashboard() {
   const [pnlHistory, setPnlHistory] = useState<PnlPoint[]>([]);
   const [openTrades, setOpenTrades] = useState<Trade[]>([]);
   const [ibkr, setIbkr] = useState<IbkrData | null>(null);
+  const [ibkrOrders, setIbkrOrders] = useState<IbkrOrder[]>([]);
   const [prices, setPrices] = useState(mockPrices);
   const [prevPrices, setPrevPrices] = useState(mockPrices);
   const now = useTime();
 
   async function fetchData() {
-    const [s, t, ib] = await Promise.all([
+    const [s, t, ib, orders] = await Promise.all([
       fetch("/api/stats").then((r) => r.json()),
       fetch("/api/trades?type=open").then((r) => r.json()),
       fetch("/api/ibkr").then((r) => r.json()).catch(() => null),
+      fetch("/api/ibkr/order").then((r) => r.json()).catch(() => []),
     ]);
     setStats(s.stats);
     setPnlHistory(s.pnlHistory);
     setOpenTrades(t);
     if (ib && !ib.error) setIbkr(ib);
+    if (Array.isArray(orders)) setIbkrOrders(orders);
   }
 
   useEffect(() => {
@@ -301,7 +323,7 @@ export default function Dashboard() {
       </div>
 
       {/* IBKR Panel */}
-      <IbkrPanel data={ibkr} />
+      <IbkrPanel data={ibkr} orders={ibkrOrders} onOrderPlaced={fetchData} />
 
       {/* Charts row */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
@@ -731,21 +753,81 @@ function PriceRow({
   );
 }
 
-function IbkrPanel({ data }: { data: IbkrData | null }) {
-  const acc = data?.account ?? {};
-  const positions = data?.positions ?? [];
-  const hasData = Object.keys(acc).length > 0;
+const IBKR_PAIRS = ["EURUSD", "GBPUSD", "AUDUSD", "USDJPY", "USDCAD", "USDCHF", "NZDUSD"];
 
-  const val = (key: string) => parseFloat(acc[key]?.value ?? "0");
+function IbkrPanel({
+  data,
+  orders,
+  onOrderPlaced,
+}: {
+  data: IbkrData | null;
+  orders: IbkrOrder[];
+  onOrderPlaced: () => void;
+}) {
+  const acc       = data?.account ?? {};
+  const positions = data?.positions ?? [];
+  const hasData   = Object.keys(acc).length > 0;
+
+  const val       = (key: string) => parseFloat(acc[key]?.value ?? "0");
   const netLiq    = val("NetLiquidation");
   const cash      = val("TotalCashValue");
   const buyPower  = val("BuyingPower");
   const unrealPnl = val("UnrealizedPnL");
 
   const lastUpdated = positions[0]?.updated_at ?? 0;
-  const isStale = hasData && lastUpdated > 0 && (Date.now() / 1000 - lastUpdated) > 120;
+  const isStale     = hasData && lastUpdated > 0 && (Date.now() / 1000 - lastUpdated) > 120;
   const statusColor = !hasData ? "var(--border)" : isStale ? "var(--yellow)" : "var(--green)";
   const statusLabel = !hasData ? "Not connected" : isStale ? "Stale" : "Live";
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({
+    pair: "EURUSD", direction: "LONG" as "LONG" | "SHORT",
+    lots: "0.1", stopLoss: "", takeProfit: "", limitPrice: "",
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<number | null>(null);
+
+  const setF = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function handlePlaceOrder() {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const body: Record<string, unknown> = {
+        pair:       form.pair,
+        direction:  form.direction,
+        lots:       parseFloat(form.lots),
+        stopLoss:   parseFloat(form.stopLoss),
+        takeProfit: parseFloat(form.takeProfit),
+      };
+      if (form.limitPrice) body.limitPrice = parseFloat(form.limitPrice);
+      const res = await fetch("/api/ibkr/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed");
+      setShowForm(false);
+      setForm({ pair: "EURUSD", direction: "LONG", lots: "0.1", stopLoss: "", takeProfit: "", limitPrice: "" });
+      onOrderPlaced();
+    } catch (e) {
+      setSubmitError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCancel(order: IbkrOrder) {
+    setCancelling(order.id);
+    try {
+      await fetch(`/api/ibkr/order/${order.id}/cancel`, { method: "POST" });
+      onOrderPlaced();
+    } finally {
+      setCancelling(null);
+    }
+  }
 
   return (
     <div className="card p-5">
@@ -753,7 +835,7 @@ function IbkrPanel({ data }: { data: IbkrData | null }) {
         <div className="flex items-center gap-2">
           <Building2 size={14} style={{ color: "var(--text-muted)" }} />
           <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>
-            IBKR Paper Account
+            IBKR Account
           </span>
           <div
             className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-widest uppercase"
@@ -770,10 +852,105 @@ function IbkrPanel({ data }: { data: IbkrData | null }) {
             {statusLabel}
           </div>
         </div>
-        <span className="text-[10px] tracking-wider uppercase" style={{ color: "var(--text-muted)" }}>
-          Interactive Brokers
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] tracking-wider uppercase" style={{ color: "var(--text-muted)" }}>
+            Interactive Brokers
+          </span>
+          {hasData && (
+            <button
+              onClick={() => { setShowForm((v) => !v); setSubmitError(null); }}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all hover:opacity-80"
+              style={{
+                background: showForm ? "var(--red-dim)" : "var(--accent-dim)",
+                border: `1px solid ${showForm ? "rgba(244,63,94,0.25)" : "var(--accent-border)"}`,
+                color: showForm ? "var(--red)" : "var(--accent)",
+              }}
+            >
+              {showForm ? <X size={10} /> : <Plus size={10} />}
+              {showForm ? "Cancel" : "New Order"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Order entry form */}
+      {showForm && (
+        <div
+          className="rounded-xl p-4 mb-4 space-y-3"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            {/* Pair */}
+            <div>
+              <label className="block text-[9px] font-semibold tracking-widest uppercase mb-1.5" style={{ color: "var(--text-muted)" }}>Pair</label>
+              <select
+                value={form.pair}
+                onChange={(e) => setF("pair")(e.target.value)}
+                className="w-full rounded-lg px-3 py-2 text-xs outline-none"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+              >
+                {IBKR_PAIRS.map((p) => (
+                  <option key={p} value={p} style={{ background: "#0a0a0a" }}>{p.slice(0,3)}/{p.slice(3)}</option>
+                ))}
+              </select>
+            </div>
+            {/* Direction */}
+            <div>
+              <label className="block text-[9px] font-semibold tracking-widest uppercase mb-1.5" style={{ color: "var(--text-muted)" }}>Direction</label>
+              <div className="flex gap-2">
+                {(["LONG", "SHORT"] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setF("direction")(d)}
+                    className="flex-1 py-2 rounded-lg text-[10px] font-bold transition-all"
+                    style={{
+                      background: form.direction === d
+                        ? (d === "LONG" ? "var(--green-dim)" : "var(--red-dim)")
+                        : "rgba(255,255,255,0.03)",
+                      border: `1px solid ${form.direction === d ? (d === "LONG" ? "rgba(16,185,129,0.3)" : "rgba(244,63,94,0.3)") : "var(--border)"}`,
+                      color: form.direction === d ? (d === "LONG" ? "var(--green)" : "var(--red)") : "var(--text-muted)",
+                    }}
+                  >
+                    {d === "LONG" ? "▲ Long" : "▼ Short"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <OrderField label="Lots" value={form.lots} onChange={setF("lots")} placeholder="0.1" />
+            <OrderField label="Stop Loss" value={form.stopLoss} onChange={setF("stopLoss")} placeholder="1.0800" />
+            <OrderField label="Take Profit" value={form.takeProfit} onChange={setF("takeProfit")} placeholder="1.1000" />
+          </div>
+
+          <OrderField
+            label="Limit Price (leave blank for Market)"
+            value={form.limitPrice}
+            onChange={setF("limitPrice")}
+            placeholder="MKT order if blank"
+          />
+
+          {submitError && (
+            <div className="text-[10px] px-3 py-2 rounded-lg" style={{ background: "var(--red-dim)", color: "var(--red)", border: "1px solid rgba(244,63,94,0.2)" }}>
+              {submitError}
+            </div>
+          )}
+
+          <button
+            onClick={handlePlaceOrder}
+            disabled={submitting || !form.stopLoss || !form.takeProfit}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-bold transition-all hover:opacity-90 disabled:opacity-40"
+            style={{
+              background: form.direction === "LONG" ? "var(--green)" : "var(--red)",
+              color: "#000",
+            }}
+          >
+            <Send size={11} />
+            {submitting ? "Submitting…" : `Place ${form.direction === "LONG" ? "Buy" : "Sell"} ${form.lots} lots ${form.limitPrice ? "LMT" : "MKT"}`}
+          </button>
+        </div>
+      )}
 
       {hasData ? (
         <>
@@ -788,8 +965,8 @@ function IbkrPanel({ data }: { data: IbkrData | null }) {
             />
           </div>
 
-          {positions.length > 0 ? (
-            <div className="space-y-2">
+          {positions.length > 0 && (
+            <div className="space-y-2 mb-4">
               <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
                 Positions
               </span>
@@ -797,30 +974,122 @@ function IbkrPanel({ data }: { data: IbkrData | null }) {
                 <IbkrPositionRow key={pos.symbol} pos={pos} />
               ))}
             </div>
-          ) : (
-            <div className="py-4 text-center text-[10px]" style={{ color: "var(--text-muted)" }}>
-              No open positions
-            </div>
           )}
         </>
       ) : (
         <div className="py-8 flex flex-col items-center gap-2">
           <Activity size={16} style={{ color: "var(--text-muted)", opacity: 0.3 }} />
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Bridge not running
-          </span>
+          <span className="text-xs" style={{ color: "var(--text-muted)" }}>Bridge not running</span>
           <span className="text-[10px]" style={{ color: "var(--border)" }}>
             Run{" "}
-            <code
-              className="px-1.5 py-0.5 rounded text-[10px]"
-              style={{ background: "var(--bg-surface)", color: "var(--accent)" }}
-            >
+            <code className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: "var(--bg-surface)", color: "var(--accent)" }}>
               npm run ibkr-bridge
             </code>{" "}
             in a second terminal
           </span>
         </div>
       )}
+
+      {/* Recent IBKR orders */}
+      {orders.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: "var(--text-muted)" }}>
+            Recent Orders
+          </span>
+          {orders.slice(0, 8).map((o) => (
+            <IbkrOrderRow key={o.id} order={o} cancelling={cancelling === o.id} onCancel={() => handleCancel(o)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OrderField({ label, value, onChange, placeholder }: {
+  label: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[9px] font-semibold tracking-widest uppercase mb-1.5" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </label>
+      <input
+        type="number"
+        step="any"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg px-3 py-2 text-xs outline-none"
+        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-primary)" }}
+        onFocus={(e) => (e.target.style.borderColor = "var(--accent)")}
+        onBlur={(e)  => (e.target.style.borderColor = "var(--border)")}
+      />
+    </div>
+  );
+}
+
+function IbkrOrderRow({
+  order, cancelling, onCancel,
+}: {
+  order: IbkrOrder;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  const isLong = order.direction === "LONG";
+  const statusColors: Record<string, string> = {
+    Submitted:    "var(--accent)",
+    PreSubmitted: "var(--accent)",
+    Filled:       "var(--green)",
+    Cancelled:    "var(--text-muted)",
+    REJECTED:     "var(--red)",
+    PENDING:      "var(--yellow)",
+    TIMEOUT:      "var(--red)",
+  };
+  const color = statusColors[order.status] ?? "var(--text-muted)";
+  const canCancel = ["Submitted", "PreSubmitted", "PENDING"].includes(order.status);
+  const qty = (order.quantity / 100_000).toFixed(2);
+
+  return (
+    <div
+      className="flex items-center justify-between py-2 px-3 rounded-lg"
+      style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className="text-[9px] font-bold px-1.5 py-0.5 rounded-md uppercase"
+          style={{
+            background: isLong ? "var(--green-dim)" : "var(--red-dim)",
+            color: isLong ? "var(--green)" : "var(--red)",
+          }}
+        >
+          {isLong ? "B" : "S"}
+        </span>
+        <span className="text-[11px] font-semibold" style={{ color: "var(--text-primary)" }}>
+          {order.pair.slice(0,3)}/{order.pair.slice(3)}
+        </span>
+        <span className="text-[10px]" style={{ color: "var(--text-muted)", fontFamily: "var(--font-data)" }}>
+          {qty}L · {order.order_type}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span
+          className="text-[9px] font-bold tracking-wider uppercase"
+          style={{ color }}
+        >
+          {order.status}
+        </span>
+        {canCancel && (
+          <button
+            onClick={onCancel}
+            disabled={cancelling}
+            className="p-1 rounded hover:opacity-70 disabled:opacity-30 transition-opacity"
+            style={{ color: "var(--red)" }}
+            title="Cancel order"
+          >
+            <Ban size={11} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

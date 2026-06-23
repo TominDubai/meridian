@@ -136,6 +136,24 @@ function initSchema(db: Database.Database) {
       currency TEXT,
       updated_at INTEGER DEFAULT (unixepoch())
     );
+
+    CREATE TABLE IF NOT EXISTS ibkr_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ibkr_order_id INTEGER,
+      pair TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      order_type TEXT NOT NULL DEFAULT 'MKT',
+      quantity REAL NOT NULL,
+      limit_price REAL,
+      stop_loss REAL,
+      take_profit REAL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      filled_price REAL,
+      error_msg TEXT,
+      trade_id INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+      updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
   `);
 
   db.exec(`
@@ -176,6 +194,8 @@ function initSchema(db: Database.Database) {
     strategy_max_consec_losses: "3",
     strategy_max_portfolio_heat:"5",
     strategy_correlation_filter:"true",
+    ibkr_live_enabled:          "false",
+    ibkr_lot_size:              "0.1",
   };
 
   const upsert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
@@ -437,6 +457,60 @@ export function getIbkrAccount(): IbkrAccountRow[] {
 
 export function getIbkrPositions(): IbkrPosition[] {
   return getDb().prepare("SELECT * FROM ibkr_positions ORDER BY symbol").all() as IbkrPosition[];
+}
+
+// ─── IBKR Orders ─────────────────────────────────────────────────────────────
+export type IbkrOrder = {
+  id: number;
+  ibkr_order_id: number | null;
+  pair: string;
+  direction: string;
+  order_type: string;
+  quantity: number;
+  limit_price: number | null;
+  stop_loss: number | null;
+  take_profit: number | null;
+  status: string;
+  filled_price: number | null;
+  error_msg: string | null;
+  trade_id: number | null;
+  created_at: number;
+  updated_at: number;
+};
+
+export function insertIbkrOrder(o: Omit<IbkrOrder, "id" | "created_at" | "updated_at">): number {
+  const result = getDb().prepare(`
+    INSERT INTO ibkr_orders
+      (ibkr_order_id,pair,direction,order_type,quantity,limit_price,stop_loss,take_profit,status,filled_price,error_msg,trade_id)
+    VALUES
+      (@ibkr_order_id,@pair,@direction,@order_type,@quantity,@limit_price,@stop_loss,@take_profit,@status,@filled_price,@error_msg,@trade_id)
+  `).run(o);
+  return result.lastInsertRowid as number;
+}
+
+export function updateIbkrOrderStatus(
+  id: number,
+  status: string,
+  ibkrOrderId?: number,
+  filledPrice?: number,
+  errorMsg?: string,
+) {
+  const fields = ["status=@status", "updated_at=unixepoch()"];
+  const params: Record<string, unknown> = { id, status };
+  if (ibkrOrderId !== undefined) { fields.push("ibkr_order_id=@ibkr_order_id"); params.ibkr_order_id = ibkrOrderId; }
+  if (filledPrice !== undefined) { fields.push("filled_price=@filled_price");   params.filled_price  = filledPrice; }
+  if (errorMsg    !== undefined) { fields.push("error_msg=@error_msg");          params.error_msg     = errorMsg;    }
+  getDb().prepare(`UPDATE ibkr_orders SET ${fields.join(", ")} WHERE id=@id`).run(params);
+}
+
+export function getIbkrOrders(limit = 50): IbkrOrder[] {
+  return getDb().prepare(
+    "SELECT * FROM ibkr_orders ORDER BY created_at DESC LIMIT ?"
+  ).all(limit) as IbkrOrder[];
+}
+
+export function getIbkrOrderById(id: number): IbkrOrder | undefined {
+  return getDb().prepare("SELECT * FROM ibkr_orders WHERE id = ?").get(id) as IbkrOrder | undefined;
 }
 
 export function hasIbkrCandles(pair: string, tf: string): boolean {

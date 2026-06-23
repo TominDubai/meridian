@@ -19,6 +19,7 @@ type Settings = {
   strategy_breakeven_r: string; strategy_trend_filter: string;
   strategy_max_daily_loss_pct: string; strategy_max_consec_losses: string;
   strategy_max_portfolio_heat: string; strategy_correlation_filter: string;
+  ibkr_live_enabled: string; ibkr_lot_size: string;
   [key: string]: string;
 };
 
@@ -33,6 +34,7 @@ const DEFAULTS: Settings = {
   strategy_breakeven_r: "1", strategy_trend_filter: "false",
   strategy_max_daily_loss_pct: "3", strategy_max_consec_losses: "3",
   strategy_max_portfolio_heat: "5", strategy_correlation_filter: "true",
+  ibkr_live_enabled: "false", ibkr_lot_size: "0.1",
 };
 
 export default function SettingsPage() {
@@ -166,6 +168,19 @@ export default function SettingsPage() {
           value={form.strategy_trend_filter === "true"}
           onChange={(v) => set("strategy_trend_filter")(v ? "true" : "false")} />
         <InfoBox>Buffer of 2 pips reduces false breakout entries. TP at 1.5× range gives a positive expected value at 40%+ win rate.</InfoBox>
+      </Section>
+
+      <Section title="Live IBKR Execution">
+        <Toggle
+          label="Enable live order execution via IBKR (strategy signals will place real orders)"
+          value={form.ibkr_live_enabled === "true"}
+          onChange={(v) => set("ibkr_live_enabled")(v ? "true" : "false")}
+        />
+        <Field label="Live lot size per trade" value={form.ibkr_lot_size} type="number" onChange={set("ibkr_lot_size")} />
+        <InfoBox>
+          ⚠️ When enabled, every London Breakout signal places a bracket order (MKT + SL + TP) on your live IBKR account.
+          Ensure the bridge is running and IB Gateway is connected. Disable to return to paper-only mode.
+        </InfoBox>
       </Section>
 
       <Section title="Loss Minimisation — Risk Guards">
