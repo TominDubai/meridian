@@ -2,6 +2,13 @@
 import { useEffect, useState } from "react";
 import { Save, Copy, CheckCircle, Info, Trash2 } from "lucide-react";
 
+const ALL_PAIRS = ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCHF", "USDJPY", "USDCAD"];
+
+const PAIR_COLORS: Record<string, string> = {
+  EURUSD: "#00d4ff", GBPUSD: "#00ff88", AUDUSD: "#f59e0b",
+  NZDUSD: "#a78bfa", USDCHF: "#fb923c", USDJPY: "#f472b6", USDCAD: "#34d399",
+};
+
 type Settings = {
   paper_balance: string; imessage_target: string; webhook_secret: string;
   risk_per_trade: string; default_lot_size: string;
@@ -17,7 +24,7 @@ type Settings = {
 
 const DEFAULTS: Settings = {
   paper_balance: "10000", imessage_target: "", webhook_secret: "",
-  risk_per_trade: "1", default_lot_size: "0.1",
+  risk_per_trade: "2", default_lot_size: "0.1",
   strategy_pairs: "EURUSD,GBPUSD",
   strategy_asian_start: "2", strategy_asian_end: "7",
   strategy_breakout_start: "8", strategy_breakout_end: "10", strategy_close_cutoff: "12",
@@ -69,7 +76,7 @@ export default function SettingsPage() {
     <div className="p-6 space-y-6 max-w-2xl">
       <div>
         <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>Settings</h1>
-        <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Configure KAIROS FX</p>
+        <p className="text-sm mt-0.5" style={{ color: "var(--text-muted)" }}>Configure Meridian</p>
       </div>
 
       {/* Webhook */}
@@ -94,13 +101,13 @@ export default function SettingsPage() {
       <Section title="Notifications">
         <Field label="iMessage Target (phone or Apple ID email)" value={form.imessage_target}
           placeholder="+447900000000 or you@icloud.com" onChange={set("imessage_target")} />
-        <InfoBox>KAIROS FX sends iMessage alerts for every signal, TP hit, SL hit, and breakeven move.</InfoBox>
+        <InfoBox>Meridian sends iMessage alerts for every signal, TP hit, SL hit, and breakeven move.</InfoBox>
       </Section>
 
       {/* Paper Trading */}
       <Section title="Paper Trading">
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Starting Balance (USD)" value={form.paper_balance} type="number" onChange={set("paper_balance")} />
+          <Field label="Starting Balance (AED)" value={form.paper_balance} type="number" onChange={set("paper_balance")} />
           <Field label="Risk per trade (%)" value={form.risk_per_trade} type="number" onChange={set("risk_per_trade")} />
         </div>
         <InfoBox>Position size is automatically calculated from your balance, risk %, entry, and stop loss distance.</InfoBox>
@@ -121,8 +128,32 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="London Breakout — Entry Filters">
-        <Field label="Pairs to trade (comma-separated)" value={form.strategy_pairs}
-          placeholder="EURUSD,GBPUSD" onChange={set("strategy_pairs")} />
+        <div>
+          <label className="block text-xs mb-2" style={{ color: "var(--text-muted)" }}>Pairs to trade</label>
+          <div className="flex flex-wrap gap-2">
+            {ALL_PAIRS.map((p) => {
+              const on = form.strategy_pairs.split(",").map((s) => s.trim().toUpperCase()).includes(p);
+              return (
+                <button key={p} onClick={() => {
+                  const current = form.strategy_pairs.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean);
+                  const next = on ? current.filter((x) => x !== p) : [...current, p];
+                  if (next.length) set("strategy_pairs")(next.join(","));
+                }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                  style={{
+                    background: on ? `${PAIR_COLORS[p]}18` : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${on ? PAIR_COLORS[p] + "55" : "var(--border)"}`,
+                    color: on ? PAIR_COLORS[p] : "var(--text-muted)",
+                  }}
+                >{p.slice(0, 3)}/{p.slice(3)}</button>
+              );
+            })}
+            <button onClick={() => set("strategy_pairs")(ALL_PAIRS.join(","))}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--border)", color: "var(--text-muted)" }}
+            >All</button>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Min range size (pips)" value={form.strategy_min_range_pips} type="number" onChange={set("strategy_min_range_pips")} />
           <Field label="Max range size (pips)" value={form.strategy_max_range_pips} type="number" onChange={set("strategy_max_range_pips")} />

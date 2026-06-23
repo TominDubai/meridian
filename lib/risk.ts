@@ -1,5 +1,5 @@
 /**
- * KAIROS FX — Risk Management Module
+ * Meridian — Risk Management Module
  *
  * Loss-minimisation principles implemented here:
  *
@@ -169,7 +169,7 @@ export function runRiskChecks(
 ): RiskCheck {
   const stats        = getStats();
   const balance      = parseFloat(stats.balance);
-  const startBalance = parseFloat(getSetting("paper_balance") || "10000");
+  const startBalance = parseFloat(getSetting("paper_balance") || "10000") / 3.6725;
   const riskState    = getOrCreateRiskState(today);
 
   // 1. Circuit breaker: daily loss limit
