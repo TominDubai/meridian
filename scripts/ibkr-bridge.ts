@@ -260,17 +260,14 @@ function connect() {
   ib.on(EventName.historicalData, (reqId, time, open, high, low, close, volume) => {
     const meta = reqMap.get(reqId);
     if (!meta) return;
+    if (typeof time === "string" && time.startsWith("finished")) {
+      log(`Historical load complete: ${meta.pair}/${meta.tf} — live bar updates active`);
+      dbLog("INFO", `[IBKR] ${meta.pair}/${meta.tf} historical load done`);
+      return;
+    }
     const ts = parseInt(time, 10);
     if (!isNaN(ts) && open != null && close != null) {
       upsertCandle(meta.pair, meta.tf, ts, open, high, low, close, volume ?? 0);
-    }
-  });
-
-  ib.on(EventName.historicalDataEnd, (reqId) => {
-    const meta = reqMap.get(reqId);
-    if (meta) {
-      log(`Historical load complete: ${meta.pair}/${meta.tf} — live bar updates active`);
-      dbLog("INFO", `[IBKR] ${meta.pair}/${meta.tf} historical load done`);
     }
   });
 

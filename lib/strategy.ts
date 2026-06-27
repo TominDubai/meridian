@@ -191,6 +191,13 @@ async function checkBreakout(
 
     const lot = scaledLotSize(balance, startBal, riskPct, entry!, sl!, pair);
 
+    // Dedupe guard: never stack a second position on a pair that already has one open.
+    // signal_fired alone proved insufficient — two identical GBPUSD LONGs opened 60s apart (2026-06-25).
+    if ((getOpenTrades() as OpenTrade[]).some((t) => t.pair === pair)) {
+      updateSession(pair, today, { signal_fired: 1, breakout_direction: direction });
+      stratLog("RISK", `[${pair}] duplicate suppressed — position already open`, pair);
+      return "position already open for this pair";
+    }
     const tradeResult = openTrade({
       pair, direction, entry_price: entry!, stop_loss: sl!, take_profit: tp!,
       lot_size: lot, signal_source: "LONDON_BREAKOUT",
