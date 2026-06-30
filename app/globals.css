@@ -20,8 +20,8 @@
   --yellow: #eab308;
   --yellow-dim: rgba(234, 179, 8, 0.08);
   --text-primary: #f0f0f0;
-  --text-secondary: #888888;
-  --text-muted: #4a4a4a;
+  --text-secondary: #b4b4b4;
+  --text-muted: #8a8a8a;
   --font-heading: var(--font-heading), "Space Grotesk", system-ui, sans-serif;
   --font-body: var(--font-heading), "Space Grotesk", system-ui, sans-serif;
   --font-data: var(--font-mono), "JetBrains Mono", ui-monospace, monospace;

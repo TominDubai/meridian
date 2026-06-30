@@ -249,6 +249,22 @@ async function checkBreakout(
     return null;
   }
 
+  // No breakout this tick. If the Asian range itself is out of bounds, surface that in
+  // telemetry so a quiet day on a too-tight/wide pair is distinguishable from a genuine
+  // wait-for-breakout. Telemetry only â€” the real entry gate stays in runRiskChecks().
+  const noBoRange = toPips(session.asian_high, session.asian_low, pair);
+  const noBoMin = parseFloat(getSetting("strategy_min_range_pips") || "15");
+  const noBoMax = parseFloat(getSetting("strategy_max_range_pips") || "50");
+  if (noBoRange < noBoMin) {
+    const msg = `Range too tight: ${noBoRange.toFixed(1)} pips (min ${noBoMin}) â€” no breakout`;
+    updateSession(pair, today, { skipped_reason: msg });
+    return msg;
+  }
+  if (noBoRange > noBoMax) {
+    const msg = `Range too wide: ${noBoRange.toFixed(1)} pips (max ${noBoMax}) â€” no breakout`;
+    updateSession(pair, today, { skipped_reason: msg });
+    return msg;
+  }
   return "no confirmed breakout candle yet";
 }
 
